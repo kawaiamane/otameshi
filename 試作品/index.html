@@ -824,8 +824,7 @@ const socketProtocol =
   location.protocol === "https:" ? "wss:" : "ws:";
 
 const SOCKET_URL =
-  `${socketProtocol}//${location.host}`;
-
+  `${socketProtocol}//${location.host}/api/ws`;
 let socket = null;
 
 let roomCode = "";
