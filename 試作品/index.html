@@ -826,6 +826,8 @@ const socketProtocol =
 const SOCKET_URL =
   `${socketProtocol}//${location.host}/api/ws`;
 let socket = null;
+let reconnectTimer = null;
+let manuallyLeaving = false;
 
 let roomCode = "";
 let playerIndex = 0;
@@ -869,6 +871,7 @@ function setError(text) {
 }
 
 function connect() {
+  clearTimeout(reconnectTimer);
   setStatus("CONNECTING", false);
 
   try {
@@ -876,6 +879,7 @@ function connect() {
   } catch {
     setStatus("ERROR", false);
     setError("WebSocketを作成できませんでした。");
+    scheduleReconnect();
     return;
   }
 
@@ -886,9 +890,16 @@ function connect() {
   socket.addEventListener("close", () => {
     setStatus("OFFLINE", false);
 
+    if (manuallyLeaving) {
+      manuallyLeaving = false;
+      return;
+    }
+
     if (gameScreen.classList.contains("active")) {
       setError("通信が切断されました。");
     }
+
+    scheduleReconnect();
   });
 
   socket.addEventListener("error", () => {
@@ -903,6 +914,15 @@ function connect() {
       console.warn("Invalid server message");
     }
   });
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!socket || socket.readyState === WebSocket.CLOSED) connect();
+  }, 1200);
 }
 
 function setStatus(text, online) {
@@ -923,6 +943,18 @@ function send(data) {
 function handleMessage(msg) {
 
   if (msg.type === "welcome") {
+    return;
+  }
+
+  if (msg.type === "leftRoom") {
+    roomCode = "";
+    playerIndex = 0;
+    boardData = [];
+    targetNumber = 1;
+    scores = [0, 0];
+    timerValue = 60;
+    combo = 0;
+    round = 1;
     return;
   }
 
@@ -1418,22 +1450,20 @@ $("copyBtn").addEventListener("click", async () => {
 });
 
 $("backBtn").addEventListener("click", () => {
+  if (socket && socket.readyState === WebSocket.OPEN && roomCode) {
+    send({ type: "leaveRoom" });
+  }
 
   roomCode = "";
   playerIndex = 0;
-
   boardData = [];
   targetNumber = 1;
   scores = [0, 0];
-
+  timerValue = 60;
+  combo = 0;
+  round = 1;
   $("roomInput").value = "";
-
   showScreen(lobbyScreen);
-
-  /*
-    接続自体はそのまま維持する。
-    新しい部屋を作れる。
-  */
 });
 
 connect();
