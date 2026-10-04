@@ -52,10 +52,6 @@ function generateRoomCode(): string {
   }
 }
 
-function randomDummy(): number {
-  return Math.floor(Math.random() * 9) + 1;
-}
-
 function shuffle<T>(array: T[]): T[] {
   const a = [...array];
   for (let i = a.length - 1; i > 0; i--) {
@@ -69,44 +65,54 @@ function neighbors(index: number): number[] {
   const row = Math.floor(index / COLS);
   const col = index % COLS;
   const result: number[] = [];
-  for (let dr = -1; dr <= 1; dr++) {
-    for (let dc = -1; dc <= 1; dc++) {
-      if (dr === 0 && dc === 0) continue;
-      const r = row + dr;
-      const c = col + dc;
-      if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
-        result.push(r * COLS + c);
-      }
+
+  const directions = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1]
+  ];
+
+  for (const [dr, dc] of directions) {
+    const r = row + dr;
+    const c = col + dc;
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
+      result.push(r * COLS + c);
     }
   }
+
   return result;
 }
 
-/*
- * 1～24の「位置」は毎回ランダムに決める。
- * ただしゲームとして必ず 1→2→…→24 と進められるよう、
- * 24マスのランダムな自己回避経路を作ってから番号を置く。
- * つまり蛇行固定配置ではなく、毎回違うランダム盤面になる。
- */
 function makeRandomPath(length: number): number[] {
-  const maxAttempts = 5000;
+  // 4方向の「誘導路」にする。
+  // これにより、1→2→3…以外の番号同士が隣接しにくく、
+  // 初期盤面で意図しない大量のつながりが発生しない。
+  const maxAttempts = 3000;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const start = Math.floor(Math.random() * SIZE);
     const path = [start];
-    const used = new Set([start]);
+    const used = new Set<number>([start]);
 
     const dfs = (): boolean => {
       if (path.length === length) return true;
 
       const current = path[path.length - 1];
-      const candidates = shuffle(neighbors(current)).filter(x => !used.has(x));
+      const candidates = shuffle(neighbors(current))
+        .filter(next => !used.has(next))
+        .filter(next => {
+          // 現在のセル以外の既存経路と接触する候補を除外する。
+          // つまり経路を「太い塊」ではなく一本の線にする。
+          return !path.some((old, index) =>
+            index < path.length - 1 && neighbors(old).includes(next)
+          );
+        });
 
-      // 先の選択肢が少ないマスを優先して、行き止まりを減らす。
       candidates.sort((a, b) => {
-        const da = neighbors(a).filter(x => !used.has(x)).length;
-        const db = neighbors(b).filter(x => !used.has(x)).length;
-        return da - db + (Math.random() - 0.5) * 2;
+        const degreeA = neighbors(a).filter(x => !used.has(x)).length;
+        const degreeB = neighbors(b).filter(x => !used.has(x)).length;
+        return degreeA - degreeB + (Math.random() - 0.5);
       });
 
       for (const next of candidates) {
@@ -116,6 +122,7 @@ function makeRandomPath(length: number): number[] {
         path.pop();
         used.delete(next);
       }
+
       return false;
     };
 
@@ -130,12 +137,25 @@ function makeBoard(target = 1): number[] {
   const remaining = MAX_NUMBER - target + 1;
   const path = makeRandomPath(remaining);
 
+  // 本物のターゲット数字は必ず1つずつ。
   path.forEach((index, i) => {
     board[index] = target + i;
   });
 
+  // ダミーには「現在〜未来のターゲット数字」を絶対に使わない。
+  // これで盤面上に1や2が何個も出現する問題を防ぐ。
+  const fillerPool = [
+    ...Array.from({ length: target - 1 }, (_, i) => i + 1),
+    ...Array.from({ length: SIZE - MAX_NUMBER }, (_, i) => MAX_NUMBER + 1 + i)
+  ];
+
+  const fillers = shuffle(fillerPool);
+  let fillerIndex = 0;
+
   for (let i = 0; i < SIZE; i++) {
-    if (board[i] === 0) board[i] = randomDummy();
+    if (board[i] === 0) {
+      board[i] = fillers[fillerIndex++ % fillers.length];
+    }
   }
 
   return board;

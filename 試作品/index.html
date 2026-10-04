@@ -1179,11 +1179,9 @@ function isAdjacent(a, b) {
   const br = Math.floor(b / 6);
   const bc = b % 6;
 
-  return (
-    Math.abs(ar - br) <= 1 &&
-    Math.abs(ac - bc) <= 1 &&
-    !(ar === br && ac === bc)
-  );
+  // 4方向のみを接続可能にする。
+  // 斜め接触による意図しない大量のつながりを防ぐ。
+  return Math.abs(ar - br) + Math.abs(ac - bc) === 1;
 }
 
 function indexFromPointer(x, y) {
