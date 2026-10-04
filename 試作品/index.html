@@ -1247,7 +1247,9 @@ function finishDrag() {
     .querySelectorAll(".cell.selected")
     .forEach(cell => cell.classList.remove("selected"));
 
-  if (path.length < 2) {
+  // 通常は2個以上のチェーン。
+  // ただし24だけが最後に残った場合は、24単体でも次ラウンドへ進める。
+  if (path.length < 2 && !(path.length === 1 && targetNumber === 24)) {
     return;
   }
 
@@ -1331,9 +1333,12 @@ function handleChain(msg) {
 
   setTimeout(() => {
     renderBoard();
+    if (msg.newRound) {
+      flashExtension("ROUND " + msg.round);
+    }
   }, 130);
 
-  if (msg.combo > 1) {
+  if (msg.combo > 1 && !msg.newRound) {
     flashExtension();
   }
 }

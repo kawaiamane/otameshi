@@ -84,81 +84,86 @@ function neighbors(index: number): number[] {
   return result;
 }
 
-function makeRandomPath(length: number): number[] {
-  // 4方向の「誘導路」にする。
-  // これにより、1→2→3…以外の番号同士が隣接しにくく、
-  // 初期盤面で意図しない大量のつながりが発生しない。
-  const maxAttempts = 3000;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const start = Math.floor(Math.random() * SIZE);
-    const path = [start];
-    const used = new Set<number>([start]);
-
-    const dfs = (): boolean => {
-      if (path.length === length) return true;
-
-      const current = path[path.length - 1];
-      const candidates = shuffle(neighbors(current))
-        .filter(next => !used.has(next))
-        .filter(next => {
-          // 現在のセル以外の既存経路と接触する候補を除外する。
-          // つまり経路を「太い塊」ではなく一本の線にする。
-          return !path.some((old, index) =>
-            index < path.length - 1 && neighbors(old).includes(next)
-          );
-        });
-
-      candidates.sort((a, b) => {
-        const degreeA = neighbors(a).filter(x => !used.has(x)).length;
-        const degreeB = neighbors(b).filter(x => !used.has(x)).length;
-        return degreeA - degreeB + (Math.random() - 0.5);
-      });
-
-      for (const next of candidates) {
-        used.add(next);
-        path.push(next);
-        if (dfs()) return true;
-        path.pop();
-        used.delete(next);
-      }
-
-      return false;
-    };
-
-    if (dfs()) return path;
-  }
-
-  throw new Error("ランダム経路を生成できませんでした。");
-}
-
 function makeBoard(target = 1): number[] {
-  const board = Array<number>(SIZE).fill(0);
-  const remaining = MAX_NUMBER - target + 1;
-  const path = makeRandomPath(remaining);
+  /*
+   * 重要:
+   * 以前は「1→2→3→…」そのものを一本の長い経路として
+   * 配置していたため、初期状態から24個近くを一気につなげられた。
+   *
+   * 今回は各数字を完全にバラバラな位置へ置く。
+   * ただしゲームが成立するように、
+   *  1. 現在のターゲットと次の数字は必ず隣接
+   *  2. 連続数字の最大接続長は MAX_INITIAL_CHAIN
+   *  3. 同じ数字は二度置かない
+   * を満たす盤面だけを採用する。
+   */
+  const MAX_INITIAL_CHAIN = 3;
+  const FUTURE_START = target;
+  const futureNumbers = Array.from(
+    { length: MAX_NUMBER - target + 1 },
+    (_, i) => FUTURE_START + i
+  );
 
-  // 本物のターゲット数字は必ず1つずつ。
-  path.forEach((index, i) => {
-    board[index] = target + i;
-  });
+  // ダミーは現在以降の数字を一切使わない。
+  // したがって「1が複数ある」などの曖昧な盤面は作らない。
+  const oldNumbers = Array.from(
+    { length: Math.max(0, target - 1) },
+    (_, i) => i + 1
+  );
+  const highNumbers = Array.from(
+    { length: SIZE - MAX_NUMBER },
+    (_, i) => MAX_NUMBER + 1 + i
+  );
+  const fillerPool = shuffle([...oldNumbers, ...highNumbers]);
 
-  // ダミーには「現在〜未来のターゲット数字」を絶対に使わない。
-  // これで盤面上に1や2が何個も出現する問題を防ぐ。
-  const fillerPool = [
-    ...Array.from({ length: target - 1 }, (_, i) => i + 1),
-    ...Array.from({ length: SIZE - MAX_NUMBER }, (_, i) => MAX_NUMBER + 1 + i)
-  ];
+  for (let attempt = 0; attempt < 20000; attempt++) {
+    const board = Array<number>(SIZE).fill(0);
+    const positions = shuffle(
+      Array.from({ length: SIZE }, (_, i) => i)
+    );
 
-  const fillers = shuffle(fillerPool);
-  let fillerIndex = 0;
-
-  for (let i = 0; i < SIZE; i++) {
-    if (board[i] === 0) {
-      board[i] = fillers[fillerIndex++ % fillers.length];
+    // 未来の数字を完全ランダムに配置する。
+    for (let i = 0; i < futureNumbers.length; i++) {
+      board[positions[i]] = futureNumbers[i];
     }
+
+    // 現在のターゲットから最低2個はつながるようにする。
+    if (futureNumbers.length >= 2) {
+      const a = futureNumbers[0];
+      const b = futureNumbers[1];
+      const ia = board.indexOf(a);
+      const ib = board.indexOf(b);
+      if (!isAdjacent(ia, ib)) continue;
+    }
+
+    // 連続した数字の最大ランを調べる。
+    let run = 1;
+    let maxRun = 1;
+    for (let n = target + 1; n <= MAX_NUMBER; n++) {
+      const prev = board.indexOf(n - 1);
+      const current = board.indexOf(n);
+      if (isAdjacent(prev, current)) {
+        run++;
+        maxRun = Math.max(maxRun, run);
+      } else {
+        run = 1;
+      }
+    }
+
+    if (maxRun > MAX_INITIAL_CHAIN) continue;
+
+    // 残りのマスをダミーで埋める。
+    let fi = 0;
+    for (let i = 0; i < SIZE; i++) {
+      if (board[i] === 0) {
+        board[i] = fillerPool[fi++ % fillerPool.length];
+      }
+    }
+
+    return board;
   }
 
-  return board;
+  throw new Error("条件を満たすランダム盤面を生成できませんでした。");
 }
 
 function createRoom(): Room {
@@ -236,7 +241,7 @@ function finishGame(room: Room, reason: string) {
 function isAdjacent(a: number, b: number): boolean {
   const ar = Math.floor(a / COLS), ac = a % COLS;
   const br = Math.floor(b / COLS), bc = b % COLS;
-  return Math.abs(ar - br) <= 1 && Math.abs(ac - bc) <= 1 && !(ar === br && ac === bc);
+  return Math.abs(ar - br) + Math.abs(ac - bc) === 1;
 }
 
 function rebuildBoard(room: Room) {
@@ -249,7 +254,7 @@ function processChain(ws: ClientSocket, rawPath: unknown) {
   const room = ws.room;
   const player = ws.playerIndex;
   if (!room || player === undefined || !room.started) return;
-  if (!Array.isArray(rawPath) || rawPath.length < 2 || rawPath.length > MAX_NUMBER) return;
+  if (!Array.isArray(rawPath) || rawPath.length < 1 || rawPath.length > MAX_NUMBER) return;
 
   const path = rawPath.map(Number);
   const used = new Set<number>();
@@ -261,6 +266,14 @@ function processChain(ws: ClientSocket, rawPath: unknown) {
 
     if (room.board[index] !== room.target + i) return;
     if (i > 0 && !isAdjacent(path[i - 1], index)) return;
+  }
+
+  // 24が単独で最後に残った場合も、その1マスを消した瞬間に
+  // 次のラウンドへ進めるようにする。
+  if (room.target === MAX_NUMBER && path.length === 1 && room.board[path[0]] === MAX_NUMBER) {
+    // 正常な最終マス。続行する。
+  } else if (path.length < 2) {
+    return;
   }
 
   room.target += path.length;
@@ -281,6 +294,8 @@ function processChain(ws: ClientSocket, rawPath: unknown) {
     room.timer = Math.min(90, room.timer + 5);
   }
 
+  // 24を消し切った場合は、同じ処理の中で即座に新ラウンドを生成する。
+  // 「24だけ残って停止する」状態を作らない。
   rebuildBoard(room);
 
   broadcast(room, {
@@ -297,9 +312,6 @@ function processChain(ws: ClientSocket, rawPath: unknown) {
     newRound
   });
 
-  if (newRound) {
-    broadcast(room, { type: "round", state: getPublicState(room) });
-  }
 }
 
 function leaveRoom(ws: ClientSocket, notify = true) {
